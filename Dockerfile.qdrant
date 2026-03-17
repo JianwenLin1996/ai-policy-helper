@@ -1,0 +1,8 @@
+FROM qdrant/qdrant:latest
+
+# Switch to root so we can install packages
+USER root
+
+# Install wget and curl
+RUN apt-get update && apt-get install -y wget curl && rm -rf /var/lib/apt/lists/*
+

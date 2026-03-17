@@ -1,4 +1,5 @@
 import time, os, math, json, hashlib
+import uuid
 from typing import List, Dict, Tuple
 import numpy as np
 from .settings import settings
@@ -58,6 +59,53 @@ class QdrantStore:
         self.dim = dim
         self._ensure_collection()
 
+    def _clean_payload(self, payload: Dict) -> Dict:
+        cleaned: Dict = {}
+        for k, v in payload.items():
+            if v is None:
+                continue
+            if isinstance(v, (np.integer, np.floating)):
+                cleaned[k] = v.item()
+                continue
+            if isinstance(v, np.ndarray):
+                cleaned[k] = v.tolist()
+                continue
+            if isinstance(v, (list, tuple)):
+                out = []
+                for item in v:
+                    if isinstance(item, (np.integer, np.floating)):
+                        out.append(item.item())
+                    else:
+                        out.append(item)
+                cleaned[k] = out
+                continue
+            if isinstance(v, dict):
+                cleaned[k] = self._clean_payload(v)
+                continue
+            cleaned[k] = v
+        return cleaned
+
+    def _clean_vector(self, v: np.ndarray) -> List[float]:
+        # Qdrant rejects NaN/Inf; make the payload JSON-safe
+        v = v.astype("float32")
+        v = np.where(np.isfinite(v), v, 0.0)
+        return v.tolist()
+
+    def _point_id(self, meta: Dict, fallback: int):
+        # Qdrant point id must be unsigned int or UUID
+        raw = meta.get("id") or meta.get("hash")
+        if raw is None:
+            return fallback
+        if isinstance(raw, int):
+            return raw
+        if isinstance(raw, str):
+            try:
+                return str(uuid.UUID(raw))
+            except Exception:
+                # Hash-like strings are not valid UUIDs; derive a stable UUID
+                return str(uuid.uuid5(uuid.NAMESPACE_URL, raw))
+        return fallback
+
     def _ensure_collection(self):
         try:
             self.client.get_collection(self.collection)
@@ -70,7 +118,10 @@ class QdrantStore:
     def upsert(self, vectors: List[np.ndarray], metadatas: List[Dict]):
         points = []
         for i, (v, m) in enumerate(zip(vectors, metadatas)):
-            points.append(qm.PointStruct(id=m.get("id") or m.get("hash") or i, vector=v.tolist(), payload=m))
+            payload = self._clean_payload(m)
+            vector = self._clean_vector(v)
+            pid = self._point_id(m, i)
+            points.append(qm.PointStruct(id=pid, vector=vector, payload=payload))
         self.client.upsert(collection_name=self.collection, points=points)
 
     def search(self, query: np.ndarray, k: int = 4) -> List[Tuple[float, Dict]]:
