@@ -139,13 +139,13 @@ class QdrantStore:
 # ---- LLM provider ----
 class StubLLM:
     def generate(self, query: str, contexts: List[Dict]) -> str:
-        lines = [f"Answer (stub): Based on the following sources:"]
+        lines = [f"Answer (stub):"]
+        texts = []
         for c in contexts:
-            sec = c.get("section") or "Section"
-            lines.append(f"- {c.get('title')} — {sec}")
-        lines.append("Summary:")
-        # naive summary of top contexts
-        joined = " ".join([c.get("text", "") for c in contexts])
+            text = c.get("text", "")
+            text = "\n".join([line.lstrip("#").strip() for line in text.splitlines()])
+            texts.append(text)
+        joined = "\n".join(texts)
         lines.append(joined[:600] + ("..." if len(joined) > 600 else ""))
         return "\n".join(lines)
 
@@ -158,7 +158,32 @@ class OpenRouterLLM:
         )
         self.model = model
 
+    def _guardrail(self, query: str) -> bool:
+        guardrail_prompt = (
+            "You are a strict policy query filter for a company policy assistant. "
+            "Return JSON only with a single key: allow (boolean). "
+            "Allow only if the query is appropriate and specifically about company policies, "
+            "product rules, returns, shipping, warranties, or internal support procedures. "
+            "Block anything unsafe, abusive, sexual, violent, or unrelated to policy guidance."
+        )
+        try:
+            resp = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": guardrail_prompt},
+                    {"role": "user", "content": query}
+                ],
+                temperature=0.0,
+                response_format={"type": "json_object"},
+            )
+            data = json.loads(resp.choices[0].message.content or "{}")
+            return bool(data.get("allow", False))
+        except Exception:
+            return False
+
     def generate(self, query: str, contexts: List[Dict]) -> str:
+        if not self._guardrail(query):
+            return "Sorry, I can only help with appropriate questions related to company policies and support procedures."
         prompt = f"You are a helpful company policy assistant. Cite sources by title and section when relevant.\nQuestion: {query}\nSources:\n"
         for c in contexts:
             prompt += f"- {c.get('title')} | {c.get('section')}\n{c.get('text')[:600]}\n---\n"
