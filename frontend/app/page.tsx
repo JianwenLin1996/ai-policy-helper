@@ -8,15 +8,10 @@ export default function Page() {
     <div className="page">
       <div className="shell">
         <Header />
-
-        <div className="layout">
-          <div>
-            <Chat />
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-            <AdminPanel />
-            <QuickTest />
-          </div>
+        <div className="stack">
+          <AdminPanel />
+          <Chat />
+          <QuickTest />
         </div>
       </div>
     </div>

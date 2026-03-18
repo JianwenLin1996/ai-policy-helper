@@ -1,3 +1,6 @@
+'use client';
+import React from 'react';
+
 const QUICK_TESTS = [
   'Can a customer return a damaged blender after 20 days?',
   'What’s the shipping SLA to East Malaysia for bulky items?',
@@ -5,6 +8,7 @@ const QUICK_TESTS = [
 ];
 
 export default function QuickTest() {
+  const [collapsed, setCollapsed] = React.useState(false);
   return (
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
@@ -14,16 +18,28 @@ export default function QuickTest() {
           <path d="M12 8h.01" />
         </svg>
         <h3 style={{ margin: 0 }}>Quick test</h3>
+        <button
+          onClick={() => setCollapsed(c => !c)}
+          className="btn secondary"
+          style={{ height: 36, padding: '0 12px', marginLeft: 'auto' }}
+          aria-label={collapsed ? 'Expand quick test' : 'Collapse quick test'}
+        >
+          {collapsed ? 'Show' : 'Hide'}
+        </button>
       </div>
-      <div className="subtle" style={{ marginBottom: 16 }}>Try these prompts after indexing documents.</div>
-      <div style={{ display: 'grid', gap: 10 }}>
-        {QUICK_TESTS.map((prompt) => (
-          <div key={prompt} className="quick-test-card">
-            <svg className="quick-test-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
-            {prompt}
+      {!collapsed && (
+        <>
+          <div className="subtle" style={{ marginBottom: 16 }}>Try these prompts after indexing documents.</div>
+          <div style={{ display: 'grid', gap: 10 }}>
+            {QUICK_TESTS.map((prompt) => (
+              <div key={prompt} className="quick-test-card">
+                <svg className="quick-test-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14" /><path d="m12 5 7 7-7 7" /></svg>
+                {prompt}
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </>
+      )}
     </div>
   );
 }
