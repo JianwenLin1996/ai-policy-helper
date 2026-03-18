@@ -14,9 +14,15 @@ from .db import SessionLocal, init_db, Message, Retrieval, ChatSession
 app = FastAPI(title="AI Policy & Product Helper")
 logger = logging.getLogger(__name__)
 _log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+_log_file = os.getenv("LOG_FILE", "/app/data/logs/backend.log")
+os.makedirs(os.path.dirname(_log_file), exist_ok=True)
 logging.basicConfig(
     level=_log_level,
     format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(_log_file),
+    ],
 )
 
 app.add_middleware(
