@@ -1,10 +1,12 @@
-import time, os, math, json, hashlib
+import time, os, math, json, hashlib, logging
 import uuid
 from typing import List, Dict, Tuple, Optional
 import numpy as np
 from .settings import settings
 from .ingest import chunk_text, doc_hash
 from qdrant_client import QdrantClient, models as qm
+
+logger = logging.getLogger(__name__)
 
 # ---- Simple local embedder (deterministic) ----
 def _tokenize(s: str) -> List[str]:
@@ -206,11 +208,13 @@ class OpenRouterLLM:
             data = json.loads(resp.choices[0].message.content or "{}")
             return bool(data.get("allow", False))
         except Exception:
+            logger.exception("Guardrail check failed, defaulting to block")
             return False
 
     def generate(self, query: str, contexts: List[Dict], history: Optional[List[Dict]] = None) -> str:
         """Generate a grounded answer, with a guardrail check first."""
         if not self._guardrail(query, history=history):
+            logger.info("Guardrail blocked request")
             return "Sorry, I can only help with appropriate questions related to company policies and support procedures."
         system_prompt = (
             "You are a helpful company policy assistant. Cite sources by title and section when relevant. "
@@ -239,6 +243,7 @@ class OpenRouterLLM:
     def generate_stream(self, query: str, contexts: List[Dict], history: Optional[List[Dict]] = None):
         """Stream a grounded answer, with a guardrail check first."""
         if not self._guardrail(query, history=history):
+            logger.info("Guardrail blocked request (stream)")
             yield "Sorry, I can only help with appropriate questions related to company policies and support procedures."
             return
         system_prompt = (
@@ -308,10 +313,13 @@ class RAGEngine:
         if settings.vector_store == "qdrant":
             try:
                 self.store = QdrantStore(collection=settings.collection_name, dim=384)
+                logger.info("Vector store: qdrant collection=%s", settings.collection_name)
             except Exception:
                 self.store = InMemoryStore(dim=384)
+                logger.warning("Qdrant unavailable, falling back to in-memory store")
         else:
             self.store = InMemoryStore(dim=384)
+            logger.info("Vector store: in-memory")
 
         # LLM selection
         if settings.llm_provider == "openrouter" and settings.openrouter_api_key:
@@ -321,12 +329,15 @@ class RAGEngine:
                     model=settings.llm_model,
                 )
                 self.llm_name = f"openrouter:{settings.llm_model}"
+                logger.info("LLM provider: %s", self.llm_name)
             except Exception:
                 self.llm = StubLLM()
                 self.llm_name = "stub"
+                logger.warning("OpenRouter init failed, using stub LLM")
         else:
             self.llm = StubLLM()
             self.llm_name = "stub"
+            logger.info("LLM provider: stub")
 
         self.metrics = Metrics()
         self._doc_titles = set()
@@ -334,6 +345,7 @@ class RAGEngine:
 
     def ingest_chunks(self, chunks: List[Dict]) -> Tuple[int, int]:
         """Embed and store chunks; return counts of new docs and chunks."""
+        logger.info("Ingesting chunks count=%s", len(chunks))
         vectors = []
         metas = []
         doc_titles_before = set(self._doc_titles)
@@ -355,6 +367,7 @@ class RAGEngine:
             self._chunk_count += 1
 
         self.store.upsert(vectors, metas)
+        logger.info("Ingested new_docs=%s new_chunks=%s", len(self._doc_titles) - len(doc_titles_before), len(metas))
         return (len(self._doc_titles) - len(doc_titles_before), len(metas))
 
     def retrieve(self, query: str, k: int = 4) -> List[Dict]:
@@ -363,6 +376,7 @@ class RAGEngine:
         qv = self.embedder.embed(query)
         results = self.store.search(qv, k=k)
         self.metrics.add_retrieval((time.time()-t0)*1000.0)
+        logger.debug("Retrieved k=%s results=%s", k, len(results))
         out = []
         for score, meta in results:
             m = dict(meta)

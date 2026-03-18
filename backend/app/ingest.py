@@ -1,6 +1,8 @@
-import os, re, hashlib
+import os, re, hashlib, logging
 from typing import List, Dict, Tuple
 from .settings import settings
+
+logger = logging.getLogger(__name__)
 
 def _read_text_file(path: str) -> str:
     """Read a text file as UTF-8, ignoring decode errors."""
@@ -36,6 +38,7 @@ def chunk_text(text: str, chunk_size: int, overlap: int) -> List[str]:
 def load_documents(data_dir: str) -> List[Dict]:
     """Load .md and .txt documents from a directory into sectioned dicts."""
     docs = []
+    logger.info("Loading documents from %s", data_dir)
     # use os.scandir for more efficient directory listing and to avoid loading non-file entries
     with os.scandir(data_dir) as it:
         entries = sorted(
@@ -53,6 +56,7 @@ def load_documents(data_dir: str) -> List[Dict]:
                 "section": section,
                 "text": body
             })
+    logger.info("Loaded documents=%s sections=%s", len(entries), len(docs))
     return docs
 
 def doc_hash(text: str) -> str:

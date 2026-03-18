@@ -3,6 +3,8 @@ from typing import List
 from fastapi.responses import StreamingResponse
 import json
 from fastapi.middleware.cors import CORSMiddleware
+import logging
+import os
 from .models import IngestResponse, AskRequest, AskResponse, MetricsResponse, Citation, Chunk, SessionResponse, MessageResponse
 from .settings import settings
 from .ingest import load_documents
@@ -10,6 +12,12 @@ from .rag import RAGEngine, build_chunks_from_docs
 from .db import SessionLocal, init_db, Message, Retrieval, ChatSession
 
 app = FastAPI(title="AI Policy & Product Helper")
+logger = logging.getLogger(__name__)
+_log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=_log_level,
+    format="%(asctime)s %(levelname)s %(name)s - %(message)s",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,6 +32,7 @@ engine = RAGEngine()
 @app.on_event("startup")
 def _init_db():
     init_db()
+    logger.info("DB initialized")
 
 @app.get("/api/health")
 def health():
@@ -34,14 +43,17 @@ def health():
 def metrics():
     """Return aggregated retrieval and generation metrics."""
     s = engine.stats()
+    logger.debug("Metrics requested")
     return MetricsResponse(**s)
 
 @app.post("/api/ingest", response_model=IngestResponse)
 def ingest():
     """Ingest documents from the configured data directory into the vector store."""
+    logger.info("Ingest started")
     docs = load_documents(settings.data_dir)
     chunks = build_chunks_from_docs(docs, settings.chunk_size, settings.chunk_overlap)
     new_docs, new_chunks = engine.ingest_chunks(chunks)
+    logger.info("Ingest completed: docs=%s chunks=%s", new_docs, new_chunks)
     return IngestResponse(indexed_docs=new_docs, indexed_chunks=new_chunks)
 
 @app.post("/api/sessions", response_model=SessionResponse)
@@ -52,6 +64,7 @@ def create_session():
         db.add(session)
         db.commit()
         db.refresh(session)
+        logger.info("Session created id=%s", session.id)
         return SessionResponse(id=session.id, created_at=session.created_at)
 
 @app.get("/api/sessions", response_model=List[SessionResponse])
@@ -63,6 +76,7 @@ def list_sessions():
             .order_by(ChatSession.created_at.desc(), ChatSession.id.desc())
             .all()
         )
+        logger.debug("Sessions listed count=%s", len(sessions))
         return [SessionResponse(id=s.id, created_at=s.created_at) for s in sessions]
 
 @app.get("/api/sessions/{session_id}/messages", response_model=List[MessageResponse])
@@ -71,6 +85,7 @@ def list_messages(session_id: int, limit: int = 20):
     with SessionLocal() as db:
         session = db.get(ChatSession, session_id)
         if not session:
+            logger.warning("Messages requested for missing session id=%s", session_id)
             raise HTTPException(status_code=404, detail="Session not found")
         msgs = (
             db.query(Message)
@@ -80,6 +95,7 @@ def list_messages(session_id: int, limit: int = 20):
             .all()
         )
         msgs = list(reversed(msgs))
+        logger.debug("Messages listed session_id=%s count=%s", session_id, len(msgs))
         return [
             MessageResponse(
                 id=m.id,
@@ -96,19 +112,23 @@ def delete_session(session_id: int):
     with SessionLocal() as db:
         session = db.get(ChatSession, session_id)
         if not session:
+            logger.warning("Delete requested for missing session id=%s", session_id)
             raise HTTPException(status_code=404, detail="Session not found")
         db.delete(session)
         db.commit()
+    logger.info("Session deleted id=%s", session_id)
     return {"status": "ok"}
 
 @app.post("/api/ask", response_model=AskResponse)
 def ask(req: AskRequest):
     """Answer a user query using retrieval-augmented generation."""
+    logger.info("Ask request session_id=%s k=%s", req.session_id, req.k)
     ctx = engine.retrieve(req.query, k=req.k or 4)
     history = []
     with SessionLocal() as db:
         chat_session = db.get(ChatSession, req.session_id)
         if not chat_session:
+            logger.warning("Ask for missing session id=%s", req.session_id)
             raise HTTPException(status_code=404, detail="Session not found")
         recent = (
             db.query(Message)
@@ -127,6 +147,7 @@ def ask(req: AskRequest):
         try:
             chat_session = db.get(ChatSession, req.session_id)
             if not chat_session:
+                logger.warning("Ask persist missing session id=%s", req.session_id)
                 raise HTTPException(status_code=404, detail="Session not found")
             user_msg = Message(session_id=chat_session.id, role="user", content=req.query)
             db.add(user_msg)
@@ -146,8 +167,10 @@ def ask(req: AskRequest):
                 retrievals.append(retrieval)
             db.add_all(retrievals)
             db.commit()
+            logger.info("Ask persisted session_id=%s", req.session_id)
         except Exception:
             db.rollback()
+            logger.exception("Ask persist failed session_id=%s", req.session_id)
             raise
         finally:
             db.close()
@@ -166,6 +189,7 @@ def ask(req: AskRequest):
 @app.post("/api/ask/stream")
 def ask_stream(req: AskRequest):
     """Stream an answer using retrieval-augmented generation."""
+    logger.info("Ask stream request session_id=%s k=%s", req.session_id, req.k)
     ctx = engine.retrieve(req.query, k=req.k or 4)
     citations = [Citation(title=c.get("title"), section=c.get("section")) for c in ctx]
     chunks = [Chunk(title=c.get("title"), section=c.get("section"), text=c.get("text")) for c in ctx]
@@ -175,6 +199,7 @@ def ask_stream(req: AskRequest):
     with SessionLocal() as db:
         chat_session = db.get(ChatSession, req.session_id)
         if not chat_session:
+            logger.warning("Ask stream for missing session id=%s", req.session_id)
             raise HTTPException(status_code=404, detail="Session not found")
         recent = (
             db.query(Message)
@@ -197,6 +222,7 @@ def ask_stream(req: AskRequest):
             with SessionLocal() as db:
                 chat_session = db.get(ChatSession, req.session_id)
                 if not chat_session:
+                    logger.warning("Ask stream persist missing session id=%s", req.session_id)
                     raise HTTPException(status_code=404, detail="Session not found")
                 user_msg = Message(session_id=chat_session.id, role="user", content=req.query)
                 db.add(user_msg)
@@ -216,6 +242,7 @@ def ask_stream(req: AskRequest):
                     retrievals.append(retrieval)
                 db.add_all(retrievals)
                 db.commit()
+            logger.info("Ask stream persisted session_id=%s", req.session_id)
             payload = {
                 "type": "final",
                 "answer": answer,
@@ -228,6 +255,7 @@ def ask_stream(req: AskRequest):
             }
             yield f"data: {json.dumps(payload)}\n\n"
         except Exception as e:
+            logger.exception("Ask stream failed session_id=%s", req.session_id)
             err = {"type": "error", "message": str(e)}
             yield f"data: {json.dumps(err)}\n\n"
 
