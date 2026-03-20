@@ -69,6 +69,7 @@ frontend/components/*    chat + admin panel
 2. More testing and analysis on the docs to fine-tune chunk size and overlap.
 3. Persistent Qdrant storage via a mounted volume.
 4. File upload with auto-ingest for non-technical users.
+5. Auto-detect network availability and use OpenRouter when online.
 
 **Tests**
 
