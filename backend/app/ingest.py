@@ -1,12 +1,16 @@
-import os, re, hashlib
+import os, re, hashlib, logging
 from typing import List, Dict, Tuple
 from .settings import settings
 
+logger = logging.getLogger(__name__)
+
 def _read_text_file(path: str) -> str:
+    """Read a text file as UTF-8, ignoring decode errors."""
     with open(path, "r", encoding="utf-8", errors="ignore") as f:
         return f.read()
 
 def _md_sections(text: str) -> List[Tuple[str, str]]:
+    """Split Markdown text into (section_title, section_text) pairs."""
     # Very simple section splitter by Markdown headings
     parts = re.split(r"\n(?=#+\s)", text)
     out = []
@@ -20,6 +24,7 @@ def _md_sections(text: str) -> List[Tuple[str, str]]:
     return out or [("Body", text)]
 
 def chunk_text(text: str, chunk_size: int, overlap: int) -> List[str]:
+    """Chunk text into overlapping token windows."""
     tokens = text.split()
     chunks = []
     i = 0
@@ -31,19 +36,29 @@ def chunk_text(text: str, chunk_size: int, overlap: int) -> List[str]:
     return chunks
 
 def load_documents(data_dir: str) -> List[Dict]:
+    """Load .md and .txt documents from a directory into sectioned dicts."""
     docs = []
-    for fname in sorted(os.listdir(data_dir)):
-        if not fname.lower().endswith((".md", ".txt")):
-            continue
-        path = os.path.join(data_dir, fname)
-        text = _read_text_file(path)
+    logger.info("Loading documents from %s", data_dir)
+    # use os.scandir for more efficient directory listing and to avoid loading non-file entries
+    with os.scandir(data_dir) as it:
+        entries = sorted(
+            (e for e in it if e.is_file() and e.name.lower().endswith((".md", ".txt"))),
+            key=lambda e: e.name
+        )
+    for entry in entries:
+        text = _read_text_file(entry.path)
+        # avoid repeated dict lookups
+        title = entry.name
+        append = docs.append
         for section, body in _md_sections(text):
-            docs.append({
-                "title": fname,
+            append({
+                "title": title,
                 "section": section,
                 "text": body
             })
+    logger.info("Loaded documents=%s sections=%s", len(entries), len(docs))
     return docs
 
 def doc_hash(text: str) -> str:
+    """Return a stable SHA-256 hash for text."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()

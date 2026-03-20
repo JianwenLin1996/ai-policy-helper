@@ -1,0 +1,8 @@
+*.env
+.agent
+.next
+node_modules
+next-env.d.ts
+*.db
+logs
+__pycache__

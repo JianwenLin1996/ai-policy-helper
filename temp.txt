@@ -1,9 +1,0 @@
-handle internet loss 
-save session, new session
-clear session
-sqlite
-continuous conversation - use redis
-guardrails - pdpa - use LLM to list out, then we do regex and masking
-logging - log file of error in backend
-streaming
-use redis for caching (time-based, clear after 30 mins)

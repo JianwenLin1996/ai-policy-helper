@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 
 class IngestResponse(BaseModel):
     indexed_docs: int
@@ -8,6 +9,7 @@ class IngestResponse(BaseModel):
 class AskRequest(BaseModel):
     query: str
     k: int | None = 4
+    session_id: int
 
 class Citation(BaseModel):
     title: str
@@ -32,3 +34,13 @@ class MetricsResponse(BaseModel):
     avg_generation_latency_ms: float
     embedding_model: str
     llm_model: str
+
+class SessionResponse(BaseModel):
+    id: int
+    created_at: datetime
+
+class MessageResponse(BaseModel):
+    id: int
+    role: str
+    content: str
+    created_at: datetime
